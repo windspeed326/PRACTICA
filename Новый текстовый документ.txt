@@ -1,0 +1,240 @@
+-- Создание базы данных
+CREATE DATABASE KoksokhimQuality
+GO
+
+USE KoksokhimQuality
+GO
+
+-- =====================================================
+-- Таблица пользователей
+-- =====================================================
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY IDENTITY(1,1),
+    Username NVARCHAR(50) UNIQUE NOT NULL,
+    PasswordHash NVARCHAR(256) NOT NULL,
+    Email NVARCHAR(100),
+    FullName NVARCHAR(100),
+    Role NVARCHAR(20) CHECK (Role IN ('Admin', 'Client')) NOT NULL,
+    CreatedDate DATETIME DEFAULT GETDATE(),
+    IsActive BIT DEFAULT 1
+)
+GO
+
+-- =====================================================
+-- Таблица партий продукции
+-- =====================================================
+CREATE TABLE ProductBatches (
+    BatchID INT PRIMARY KEY IDENTITY(1,1),
+    BatchNumber NVARCHAR(50) UNIQUE NOT NULL,
+    ProductionDate DATETIME NOT NULL,
+    ProductType NVARCHAR(50) NOT NULL,
+    Quantity DECIMAL(10, 2),
+    Status NVARCHAR(20) DEFAULT 'Pending' CHECK (Status IN ('Pending', 'Approved', 'Rejected'))
+)
+GO
+
+-- =====================================================
+-- Таблица параметров качества
+-- =====================================================
+CREATE TABLE QualityParameters (
+    ParameterID INT PRIMARY KEY IDENTITY(1,1),
+    ParameterName NVARCHAR(100) NOT NULL,
+    Unit NVARCHAR(20),
+    MinValue DECIMAL(10, 3),
+    MaxValue DECIMAL(10, 3),
+    Description NVARCHAR(255)
+)
+GO
+
+-- =====================================================
+-- Таблица результатов анализов
+-- =====================================================
+CREATE TABLE AnalysisResults (
+    ResultID INT PRIMARY KEY IDENTITY(1,1),
+    BatchID INT NOT NULL,
+    ParameterID INT NOT NULL,
+    AnalyzedBy INT NOT NULL,
+    AnalysisDate DATETIME DEFAULT GETDATE(),
+    ResultValue DECIMAL(10, 3),
+    IsPassed BIT,
+    Notes NVARCHAR(500),
+    
+    CONSTRAINT FK_AnalysisResults_Batches FOREIGN KEY (BatchID) 
+        REFERENCES ProductBatches(BatchID) ON DELETE CASCADE,
+    CONSTRAINT FK_AnalysisResults_Parameters FOREIGN KEY (ParameterID) 
+        REFERENCES QualityParameters(ParameterID) ON DELETE CASCADE,
+    CONSTRAINT FK_AnalysisResults_Users FOREIGN KEY (AnalyzedBy) 
+        REFERENCES Users(UserID)
+)
+GO
+
+-- =====================================================
+-- Таблица отчетов
+-- =====================================================
+CREATE TABLE Reports (
+    ReportID INT PRIMARY KEY IDENTITY(1,1),
+    ReportName NVARCHAR(100) NOT NULL,
+    CreatedBy INT NOT NULL,
+    CreatedDate DATETIME DEFAULT GETDATE(),
+    ReportType NVARCHAR(50),
+    FilePath NVARCHAR(500),
+    
+    CONSTRAINT FK_Reports_Users FOREIGN KEY (CreatedBy) 
+        REFERENCES Users(UserID)
+)
+GO
+
+-- =====================================================
+-- ЗАПОЛНЕНИЕ ТЕСТОВЫМИ ДАННЫМИ
+-- =====================================================
+
+-- Параметры качества
+INSERT INTO QualityParameters (ParameterName, Unit, MinValue, MaxValue, Description) VALUES
+(N'Влага', N'%', 0, 8, N'Содержание влаги в коксе'),
+(N'Зольность', N'%', 0, 12, N'Содержание золы'),
+(N'Сера', N'%', 0, 1.5, N'Содержание серы'),
+(N'Летучие вещества', N'%', 0, 3, N'Содержание летучих веществ'),
+(N'Прочность', N'МПа', 60, 100, N'Механическая прочность')
+GO
+
+-- Пользователи (пароль admin = 'admin', client = 'client', petrov = 'client')
+INSERT INTO Users (Username, PasswordHash, Email, FullName, Role, IsActive) VALUES
+('admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'admin@koks.ru', N'Администратор', 'Admin', 1),
+('client', '6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090', 'client@koks.ru', N'Иванов Иван', 'Client', 1),
+('petrov', '6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090', 'petrov@koks.ru', N'Петров Петр', 'Client', 1),
+('sidorov', '6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090', 'sidorov@koks.ru', N'Сидоров Сидор', 'Client', 0)
+GO
+
+-- Партии продукции (используем CONVERT для дат)
+INSERT INTO ProductBatches (BatchNumber, ProductionDate, ProductType, Quantity, Status) VALUES
+('BATCH-2024-001', CONVERT(DATETIME, '2024-01-15', 120), N'Кокс металлургический', 1500.5, 'Approved'),
+('BATCH-2024-002', CONVERT(DATETIME, '2024-01-20', 120), N'Кокс литейный', 1200.0, 'Pending'),
+('BATCH-2024-003', CONVERT(DATETIME, '2024-01-25', 120), N'Кокс специальный', 800.75, 'Approved'),
+('BATCH-2024-004', CONVERT(DATETIME, '2024-02-01', 120), N'Кокс металлургический', 2000.0, 'Pending'),
+('BATCH-2024-005', CONVERT(DATETIME, '2024-02-05', 120), N'Кокс литейный', 950.25, 'Rejected'),
+('BATCH-2024-006', CONVERT(DATETIME, '2024-02-10', 120), N'Кокс металлургический', 1750.0, 'Approved'),
+('BATCH-2024-007', CONVERT(DATETIME, '2024-02-15', 120), N'Кокс специальный', 1100.0, 'Pending')
+GO
+
+-- Получаем ID для дальнейшего использования
+DECLARE @AdminID INT, @ClientID1 INT, @ClientID2 INT
+SELECT @AdminID = UserID FROM Users WHERE Username = 'admin'
+SELECT @ClientID1 = UserID FROM Users WHERE Username = 'client'
+SELECT @ClientID2 = UserID FROM Users WHERE Username = 'petrov'
+
+-- Анализы для первых трех партий
+-- Batch 1
+INSERT INTO AnalysisResults (BatchID, ParameterID, AnalyzedBy, AnalysisDate, ResultValue, IsPassed, Notes)
+SELECT 
+    b.BatchID,
+    p.ParameterID,
+    @AdminID,
+    DATEADD(day, -ABS(CHECKSUM(NEWID()) % 30), GETDATE()),
+    5 + (ABS(CHECKSUM(NEWID()) % 100) / 10.0),
+    CASE WHEN p.ParameterName = N'Влага' AND 5 + (ABS(CHECKSUM(NEWID()) % 100) / 10.0) BETWEEN 0 AND 8 THEN 1
+         WHEN p.ParameterName = N'Зольность' AND 5 + (ABS(CHECKSUM(NEWID()) % 100) / 10.0) BETWEEN 0 AND 12 THEN 1
+         WHEN p.ParameterName = N'Сера' AND 5 + (ABS(CHECKSUM(NEWID()) % 100) / 10.0) BETWEEN 0 AND 1.5 THEN 1
+         WHEN p.ParameterName = N'Летучие вещества' AND 5 + (ABS(CHECKSUM(NEWID()) % 100) / 10.0) BETWEEN 0 AND 3 THEN 1
+         WHEN p.ParameterName = N'Прочность' AND 5 + (ABS(CHECKSUM(NEWID()) % 100) / 10.0) BETWEEN 60 AND 100 THEN 1
+         ELSE 0 END,
+    CASE WHEN ABS(CHECKSUM(NEWID()) % 5) = 0 THEN N'Повторный анализ' ELSE NULL END
+FROM ProductBatches b
+CROSS JOIN QualityParameters p
+WHERE b.BatchNumber IN ('BATCH-2024-001', 'BATCH-2024-002', 'BATCH-2024-003')
+GO
+
+-- Добавляем анализы для Batch 4
+INSERT INTO AnalysisResults (BatchID, ParameterID, AnalyzedBy, AnalysisDate, ResultValue, IsPassed, Notes)
+VALUES
+(4, 1, 2, DATEADD(day, -5, GETDATE()), 7.2, 1, N'Норма'),
+(4, 2, 2, DATEADD(day, -5, GETDATE()), 10.5, 1, N'Хорошо'),
+(4, 3, 2, DATEADD(day, -5, GETDATE()), 1.8, 0, N'Превышение')
+GO
+
+-- Добавляем анализы для Batch 5
+INSERT INTO AnalysisResults (BatchID, ParameterID, AnalyzedBy, AnalysisDate, ResultValue, IsPassed, Notes)
+VALUES
+(5, 1, 3, DATEADD(day, -10, GETDATE()), 9.5, 0, N'Влажность выше нормы'),
+(5, 2, 3, DATEADD(day, -10, GETDATE()), 14.2, 0, N'Зольность выше'),
+(5, 4, 3, DATEADD(day, -10, GETDATE()), 3.5, 0, N'Летучие превышены')
+GO
+
+-- Добавляем анализы для Batch 6
+INSERT INTO AnalysisResults (BatchID, ParameterID, AnalyzedBy, AnalysisDate, ResultValue, IsPassed, Notes)
+VALUES
+(6, 1, 1, DATEADD(day, -15, GETDATE()), 5.8, 1, N'Отлично'),
+(6, 2, 1, DATEADD(day, -15, GETDATE()), 8.9, 1, N'Хорошо'),
+(6, 5, 1, DATEADD(day, -15, GETDATE()), 75.5, 1, N'Прочность в норме')
+GO
+
+-- Отчеты
+INSERT INTO Reports (ReportName, CreatedBy, ReportType, CreatedDate, FilePath) VALUES
+(N'Отчет по качеству за январь', 1, N'Качество', DATEADD(day, -20, GETDATE()), N'Reports\quality_jan.xlsx'),
+(N'Анализ брака февраль', 1, N'Брак', DATEADD(day, -5, GETDATE()), N'Reports\defect_feb.xlsx'),
+(N'Статистика параметров', 2, N'Статистика', DATEADD(day, -2, GETDATE()), N'Reports\stats.xlsx')
+GO
+
+-- =====================================================
+-- ПРОСМОТР РЕЗУЛЬТАТОВ
+-- =====================================================
+SELECT 'Users' as TableName, COUNT(*) as Records FROM Users
+UNION ALL
+SELECT 'ProductBatches', COUNT(*) FROM ProductBatches
+UNION ALL
+SELECT 'QualityParameters', COUNT(*) FROM QualityParameters
+UNION ALL
+SELECT 'AnalysisResults', COUNT(*) FROM AnalysisResults
+UNION ALL
+SELECT 'Reports', COUNT(*) FROM Reports
+GO
+
+-- =====================================================
+-- ПОЛЕЗНЫЕ ЗАПРОСЫ
+-- =====================================================
+
+-- 1. Все пользователи
+SELECT * FROM Users
+GO
+
+-- 2. Все партии
+SELECT * FROM ProductBatches
+GO
+
+-- 3. Все параметры качества
+SELECT * FROM QualityParameters
+GO
+
+-- 4. Анализы с деталями
+SELECT 
+    ar.ResultID,
+    pb.BatchNumber,
+    qp.ParameterName,
+    ar.ResultValue,
+    qp.Unit,
+    qp.MinValue,
+    qp.MaxValue,
+    CASE WHEN ar.IsPassed = 1 THEN 'Да' ELSE 'Нет' END as Passed,
+    u.FullName as Analyst,
+    ar.AnalysisDate,
+    ar.Notes
+FROM AnalysisResults ar
+JOIN ProductBatches pb ON ar.BatchID = pb.BatchID
+JOIN QualityParameters qp ON ar.ParameterID = qp.ParameterID
+JOIN Users u ON ar.AnalyzedBy = u.UserID
+ORDER BY ar.AnalysisDate DESC
+GO
+
+-- 5. Статистика по параметрам
+SELECT 
+    qp.ParameterName,
+    COUNT(*) as TotalAnalysis,
+    AVG(ar.ResultValue) as AvgValue,
+    MIN(ar.ResultValue) as MinValue,
+    MAX(ar.ResultValue) as MaxValue,
+    SUM(CASE WHEN ar.IsPassed = 1 THEN 1 ELSE 0 END) as Passed,
+    SUM(CASE WHEN ar.IsPassed = 0 THEN 1 ELSE 0 END) as Failed,
+    CAST(SUM(CASE WHEN ar.IsPassed = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS DECIMAL(5,2)) as SuccessRate
+FROM AnalysisResults ar
+JOIN QualityParameters qp ON ar.ParameterID = qp.ParameterID
+GROUP BY qp.ParameterName
+GO
